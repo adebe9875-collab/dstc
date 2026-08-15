@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>dstc</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 100%; height: 100%; background: #000; overflow: hidden;
+    font-family: 'Courier New', 'Consolas', monospace;
+  }
+
+  #bootScreen {
+    position: fixed; inset: 0; background: #000; color: #fff;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 9999;
+  }
+  #bootLogo { font-size: 20px; font-weight: bold; letter-spacing: 2px; margin-bottom: 20px; color: #d70a53; }
+  #bootLines { font-size: 13px; color: #aaa; line-height: 1.8; text-align: left; width: 360px; }
+  #bootLines span.ok { color: #22c55e; }
+
+  #dosScreen {
+    display: none;
+    position: fixed; inset: 0; background: #000; color: #d1d1d1;
+    padding: 14px 18px; font-size: 15px; line-height: 1.5;
+    overflow-y: auto;
+  }
+  #dosOutput { white-space: pre-wrap; word-break: break-word; }
+  #dosOutput .prompt-line { color: #d1d1d1; }
+  #dosOutput .cmd { color: #fff; }
+  #dosOutput .err { color: #ff5f5f; }
+  #dosOutput .ok { color: #22c55e; }
+  #dosOutput .hint { color: #6b7280; }
+
+  #dosInputRow { display: flex; align-items: center; }
+  #dosPromptLabel { color: #d1d1d1; white-space: nowrap; }
+  #dosInput {
+    flex: 1; background: transparent; border: none; outline: none;
+    color: #fff; font-family: inherit; font-size: 15px; margin-left: 6px;
+    caret-color: #d70a53;
+  }
+
+  /* ===== نوافذ التطبيقات (تُفتح فوق شاشة الدوس) ===== */
+  .app-window {
+    position: absolute; background: #111; border: 2px solid #d70a53;
+    display: flex; flex-direction: column; overflow: hidden;
+    min-width: 320px; min-height: 220px; z-index: 500;
+  }
+  .window-titlebar {
+    background: #d70a53; color: #fff; padding: 6px 10px;
+    display: flex; justify-content: space-between; align-items: center;
+    cursor: move; font-size: 13px; font-weight: bold; letter-spacing: 1px;
+  }
+  .window-controls button {
+    background: #000; color: #fff; border: 1px solid #fff; width: 20px; height: 18px;
+    font-size: 11px; cursor: pointer; margin-left: 4px;
+  }
+  .window-body {
+    flex: 1; padding: 14px; color: #d1d1d1; font-size: 13px; overflow-y: auto;
+    font-family: 'Courier New', monospace;
+  }
+  .taskbar-app {
+    position: fixed; bottom: 0; left: 0; right: 0; height: 26px;
+    background: #111; border-top: 1px solid #d70a53; display: flex;
+    gap: 6px; align-items: center; padding: 0 8px; z-index: 600;
+  }
+  .taskbar-app button {
+    background: #000; color: #fff; border: 1px solid #d70a53; padding: 2px 10px;
+    font-size: 11px; cursor: pointer; font-family: inherit;
+  }
+</style>
+</head>
+<body>
+
+<!-- شاشة الإقلاع -->
+<div id="bootScreen">
+  <div id="bootLogo">dstc</div>
+  <div id="bootLines"></div>
+</div>
+
+<!-- شاشة الدوس الرئيسية -->
+<div id="dosScreen">
+  <div id="dosOutput"></div>
+  <div id="dosInputRow">
+    <span id="dosPromptLabel">C:\DSTC&gt;</span>
+    <input id="dosInput" type="text" autofocus spellcheck="false" autocomplete="off">
+  </div>
+</div>
+
+<div id="taskbarApps" class="taskbar-app" style="display:none;"></div>
+
+<script>
+/* =====================================================
+   dstc
+   A DOS-style, English-only shell built on the same
+   ALphoenixa OS foundations (HTML/CSS/JavaScript).
+   Type "help" for a list of commands.
+   ===================================================== */
+
+/* ---------- شاشة الإقلاع ---------- */
+const bootMessages = [
+  'ALphoenixa BIOS v1.0 ......................... [ OK ]',
+  'Detecting simulated hardware ................. [ OK ]',
+  'Loading ALPHOENIXA.SYS ....................... [ OK ]',
+  'Loading COMMAND.COM (simulated) .............. [ OK ]',
+  'Starting dstc shell ................. [ OK ]'
+];
+
+function startBoot() {
+  const linesEl = document.getElementById('bootLines');
+  let i = 0;
+  const iv = setInterval(() => {
+    if (i < bootMessages.length) {
+      const line = document.createElement('div');
+      line.innerHTML = bootMessages[i].replace('[ OK ]', '<span class="ok">[ OK ]</span>');
+      linesEl.appendChild(line);
+      i++;
+    } else {
+      clearInterval(iv);
+      setTimeout(() => {
+        document.getElementById('bootScreen').style.display = 'none';
+        document.getElementById('dosScreen').style.display = 'block';
+        printWelcome();
+        document.getElementById('dosInput').focus();
+      }, 500);
+    }
+  }, 350);
+}
+
+function printWelcome() {
+  printLine('dstc [Version 1.0]');
+  printLine('(c) ALphoenixa OS Project. Built by Adam.');
+  printLine('');
+  printLine('This is an English-only command shell. Type HELP for commands.', 'hint');
+  printLine('');
+}
+
+/* ---------- طباعة في شاشة الدوس ---------- */
+function printLine(text, cls) {
+  const out = document.getElementById('dosOutput');
+  const div = document.createElement('div');
+  if (cls) div.className = cls;
+  div.textContent = text;
+  out.appendChild(div);
+  document.getElementById('dosScreen').scrollTop = document.getElementById('dosScreen').scrollHeight;
+}
+
+function printEcho(cmd) {
+  const out = document.getElementById('dosOutput');
+  const div = document.createElement('div');
+  div.className = 'prompt-line';
+  div.innerHTML = '<span class="cmd">C:\\DSTC&gt; ' + escapeHtml(cmd) + '</span>';
+  out.appendChild(div);
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/* ---------- إدخال الأوامر ---------- */
+const input = document.getElementById('dosInput');
+const commandHistory = [];
+let historyIndex = -1;
+
+input.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    const raw = input.value;
+    input.value = '';
+    printEcho(raw);
+    handleCommand(raw);
+    if (raw.trim()) { commandHistory.push(raw); historyIndex = commandHistory.length; }
+  } else if (e.key === 'ArrowUp') {
+    if (historyIndex > 0) { historyIndex--; input.value = commandHistory[historyIndex]; }
+    e.preventDefault();
+  } else if (e.key === 'ArrowDown') {
+    if (historyIndex < commandHistory.length - 1) { historyIndex++; input.value = commandHistory[historyIndex]; }
+    else { historyIndex = commandHistory.length; input.value = ''; }
+    e.preventDefault();
+  }
+});
+
+document.getElementById('dosScreen').addEventListener('click', () => input.focus());
+
+/* ---------- كشف اللغة: إنجليزي فقط ---------- */
+function containsNonEnglish(text) {
+  /* أي حرف خارج النطاق اللاتيني الأساسي والأرقام والرموز الشائعة يُعتبر غير إنجليزي */
+  return /[^\x00-\x7F]/.test(text);
+}
+
+/* ---------- تفسير أوامر طبيعية زي "open terminal" أو "open task manager" ---------- */
+const appNameMap = {
+  'terminal': 'terminal',
+  'task manager': 'taskmanager',
+  'taskmanager': 'taskmanager',
+  'task management': 'taskmanager',
+  'settings': 'settings',
+  'files': 'files',
+  'about': 'about',
+  'store': 'store',
+  'language': 'language',
+  'languages': 'language',
+  'language settings': 'language'
+};
+
+function tryOpenAppFromPhrase(text) {
+  const lower = text.toLowerCase().trim();
+  let match = null;
+
+  if (lower.startsWith('open ')) {
+    const rest = lower.slice(5).trim();
+    match = appNameMap[rest] || null;
+    if (!match) {
+      // نبحث عن أقرب اسم تطبيق موجود داخل الجملة
+      for (const key in appNameMap) {
+        if (rest.includes(key)) { match = appNameMap[key]; break; }
+      }
+    }
+  }
+  return match;
+}
+
+/* ---------- تنفيذ الأوامر ---------- */
+function handleCommand(raw) {
+  const text = raw.trim();
+  if (text === '') return;
+
+  if (containsNonEnglish(text)) {
+    printLine('ERROR: I only understand English. Please type your command in English.', 'err');
+    return;
+  }
+
+  /* أولاً: تحقق من صيغة "open <app name>" الطبيعية */
+  const appToOpen = tryOpenAppFromPhrase(text);
+  if (appToOpen) {
+    openApp(appToOpen);
+    printLine(`Launching ${appToOpen}...`, 'ok');
+    return;
+  }
+
+  const parts = text.split(' ');
+  const cmd = parts[0].toLowerCase();
+  const args = parts.slice(1);
+
+  switch (cmd) {
+    case 'help':
+      printLine('dstc - available commands:');
+      printLine('  HELP                 show this help');
+      printLine('  OPEN <app>           open an app: terminal, settings, files, about, store, task manager, language');
+      printLine('  DIR / LS             list simulated files');
+      printLine('  CLS / CLEAR          clear the screen');
+      printLine('  VER                  show system version');
+      printLine('  KERNEL               show kernel info (English only)');
+      printLine('  DATE                 show current date and time');
+      printLine('  ECHO <text>          print text back');
+      printLine('  KEYS                 show ALphoenixa OS activation keys');
+      printLine('  LANGUAGE             open display language settings');
+      printLine('  EXIT                 shutdown dstc');
+      break;
+
+    case 'kernel':
+      printLine('ALphoenixa Kernel 1.0 (simulated, English-only mode)', 'ok');
+      printLine('Built on: ALphoenixa OS');
+      printLine('Created by: Adam');
+      printLine('Build: DOS-shell / HTML+CSS+JavaScript');
+      break;
+
+    case 'ver':
+      printLine('dstc [Version 1.0] - built on ALphoenixa OS');
+      break;
+
+    case 'dir':
+    case 'ls':
+      printLine(' Directory of C:\\DSTC');
+      printLine('');
+      printLine(' WELCOME  TXT');
+      printLine(' NOTES    TXT');
+      printLine(' SYSTEM   SYS');
+      printLine(' KEYS     DAT');
+      printLine('');
+      printLine(' 4 file(s)');
+      break;
+
+    case 'cls':
+    case 'clear':
+      document.getElementById('dosOutput').innerHTML = '';
+      break;
+
+    case 'date':
+      printLine(new Date().toString());
+      break;
+
+    case 'echo':
+      printLine(args.join(' '));
+      break;
+
+    case 'keys':
+      printLine('ALphoenixa OS activation keys:', 'ok');
+      acceptedActivationKeys.forEach(k => printLine('  ' + k));
+      break;
+
+    case 'exit':
+      printLine('Shutting down dstc...', 'hint');
+      setTimeout(() => {
+        document.getElementById('dosScreen').style.display = 'none';
+        document.getElementById('bootScreen').style.display = 'flex';
+        document.getElementById('bootLines').innerHTML = '';
+        startBoot();
+      }, 800);
+      break;
+
+    case 'language':
+      openApp('language');
+      printLine('Opening language settings...', 'ok');
+      break;
+
+    default:
+      printLine(`'${raw}' is not recognized as an internal or external command.`, 'err');
+      printLine('Type HELP for a list of commands.', 'hint');
+  }
+}
+
+/* ---------- مفاتيح ALphoenixa OS (نفس المفاتيح المعتمدة) ---------- */
+const acceptedActivationKeys = [
+  'ALPHX-2026-M9QK-TZRW',
+  'ALPHX-2026-P4LC-GXVN',
+  'ALPHX-2026-B7DF-YKMS',
+  'ALPHX-2026-U2HT-JWCQ',
+  'ALPHX-2026-E5NX-RLPB'
+];
+
+/* =====================================================
+   نظام النوافذ المصغّر (نفس فكرة ALphoenixa OS)
+   تُفتح فوق شاشة الدوس عند كتابة "open <app>"
+   ===================================================== */
+const appContent = {
+  terminal: {
+    title: 'TERMINAL',
+    body: '<p>This is a nested terminal window.</p><p>Full terminal features are available in the main ALphoenixa OS build.</p>'
+  },
+  settings: {
+    title: 'SETTINGS',
+    body: '<p>dstc Settings</p><p>System: dstc 1.0</p><p>Mode: English-only shell</p>'
+  },
+  files: {
+    title: 'FILES',
+    body: '<p>C:\\DSTC\\</p><p>&nbsp;&nbsp;WELCOME.TXT</p><p>&nbsp;&nbsp;NOTES.TXT</p><p>&nbsp;&nbsp;SYSTEM.SYS</p>'
+  },
+  about: {
+    title: 'ABOUT',
+    body: '<p><strong>dstc</strong></p><p>A DOS-style shell built on the ALphoenixa OS project.</p><p>Built entirely with HTML, CSS, and JavaScript.</p><p>Created by: Adam</p><p>This is a simulation only — not a real operating system.</p>'
+  },
+  store: {
+    title: 'STORE',
+    body: '<p>dstc command store (simplified).</p><p>All core commands are already built-in — type HELP.</p>'
+  },
+  taskmanager: {
+    title: 'TASK MANAGER',
+    body: '<div id="taskManagerBody"></div>'
+  },
+  language: {
+    title: 'LANGUAGE',
+    body: `
+      <div style="text-align:center;">
+        <div id="langCurrentName" style="font-size:16px; font-weight:bold; color:#d70a53; margin-bottom:14px;"></div>
+        <div style="display:flex; align-items:center; justify-content:center; gap:14px;">
+          <button onclick="cycleLanguage(-1)" style="background:#000; color:#fff; border:2px solid #d70a53; width:34px; height:34px; font-size:16px; cursor:pointer;">▲</button>
+          <div id="langIndex" style="font-size:13px; color:#888; min-width:50px;"></div>
+          <button onclick="cycleLanguage(1)" style="background:#000; color:#fff; border:2px solid #d70a53; width:34px; height:34px; font-size:16px; cursor:pointer;">▼</button>
+        </div>
+        <p style="margin-top:16px; font-size:11px; color:#666;">Move up/down to cycle through languages I understand.</p>
+      </div>
+    `
+  }
+};
+
+const fakeProcesses = [
+  { name: 'ALPHOENIXA.SYS', cpu: 2, mem: 12 },
+  { name: 'COMMAND.COM',    cpu: 1, mem: 4  },
+  { name: 'SHELL.EXE',      cpu: 3, mem: 8  },
+  { name: 'CLOCK.DRV',      cpu: 0, mem: 1  },
+  { name: 'DOSKEY.COM',     cpu: 0, mem: 2  }
+];
+
+let zTop = 500;
+const openWindows = {};
+
+function openApp(appId) {
+  if (openWindows[appId]) {
+    bringToFront(openWindows[appId]);
+    return;
+  }
+  const data = appContent[appId];
+  if (!data) return;
+
+  const win = document.createElement('div');
+  win.className = 'app-window';
+  win.style.width = '360px';
+  win.style.height = '260px';
+  win.style.top = (60 + Math.random() * 100) + 'px';
+  win.style.left = (60 + Math.random() * 140) + 'px';
+  win.style.zIndex = ++zTop;
+
+  win.innerHTML = `
+    <div class="window-titlebar">
+      <span>${data.title}</span>
+      <div class="window-controls">
+        <button onclick="closeApp('${appId}')">X</button>
+      </div>
+    </div>
+    <div class="window-body">${data.body}</div>
+  `;
+
+  document.body.appendChild(win);
+  openWindows[appId] = win;
+  makeDraggable(win, win.querySelector('.window-titlebar'));
+  win.addEventListener('mousedown', () => bringToFront(win));
+  addTaskbarButton(appId, data.title);
+
+  if (appId === 'taskmanager') renderTaskManager();
+  if (appId === 'language') applyLanguage();
+}
+
+function closeApp(appId) {
+  if (openWindows[appId]) {
+    openWindows[appId].remove();
+    delete openWindows[appId];
+  }
+  removeTaskbarButton(appId);
+}
+
+function bringToFront(win) {
+  win.style.zIndex = ++zTop;
+}
+
+function makeDraggable(win, handle) {
+  let offsetX = 0, offsetY = 0, dragging = false;
+  handle.addEventListener('mousedown', (e) => {
+    dragging = true;
+    offsetX = e.clientX - win.offsetLeft;
+    offsetY = e.clientY - win.offsetTop;
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    win.style.left = (e.clientX - offsetX) + 'px';
+    win.style.top = (e.clientY - offsetY) + 'px';
+  });
+  document.addEventListener('mouseup', () => dragging = false);
+}
+
+function addTaskbarButton(appId, title) {
+  const bar = document.getElementById('taskbarApps');
+  bar.style.display = 'flex';
+  const btn = document.createElement('button');
+  btn.id = 'task-' + appId;
+  btn.textContent = title;
+  btn.onclick = () => bringToFront(openWindows[appId]);
+  bar.appendChild(btn);
+}
+
+function removeTaskbarButton(appId) {
+  const btn = document.getElementById('task-' + appId);
+  if (btn) btn.remove();
+  const bar = document.getElementById('taskbarApps');
+  if (!bar.children.length) bar.style.display = 'none';
+}
+
+function renderTaskManager() {
+  const body = document.getElementById('taskManagerBody');
+  if (!body) return;
+  let html = '<table style="width:100%; border-collapse:collapse; font-size:12px;">';
+  html += '<tr style="color:#d70a53;"><td>PROCESS</td><td>CPU%</td><td>MEM(MB)</td></tr>';
+  fakeProcesses.forEach(p => {
+    html += `<tr><td>${p.name}</td><td>${p.cpu}%</td><td>${p.mem}</td></tr>`;
+  });
+  html += '</table>';
+  body.innerHTML = html;
+}
+
+/* =====================================================
+   إعدادات اللغة — يبدّل نص الترحيب وعلامة البرومبت فقط
+   (أوامر النظام نفسها تبقى إنجليزية دائماً)
+   ===================================================== */
+const languages = [
+  { code: 'en', name: 'English',    prompt: 'C:\\DSTC>',  welcome: 'This is an English-only command shell. Type HELP for commands.' },
+  { code: 'ar', name: 'Arabic',     prompt: 'C:\\دي إس تي سي>', welcome: 'هذا برومبت بلغة عربية للعرض فقط — الأوامر نفسها تبقى إنجليزية دائماً.' },
+  { code: 'fr', name: 'French',     prompt: 'C:\\DSTC>',  welcome: "Interface en français pour l'affichage — les commandes restent en anglais." },
+  { code: 'es', name: 'Spanish',    prompt: 'C:\\DSTC>',  welcome: 'Interfaz en español para mostrar — los comandos siguen en inglés.' },
+  { code: 'de', name: 'German',     prompt: 'C:\\DSTC>',  welcome: 'Deutsche Anzeige-Oberfläche — Befehle bleiben auf Englisch.' },
+  { code: 'ja', name: 'Japanese',   prompt: 'C:\\DSTC>',  welcome: '日本語表示インターフェース — コマンドは英語のままです。' },
+  { code: 'zh', name: 'Chinese',    prompt: 'C:\\DSTC>',  welcome: '中文显示界面 — 命令仍为英语。' },
+  { code: 'ru', name: 'Russian',    prompt: 'C:\\DSTC>',  welcome: 'Интерфейс отображения на русском — команды остаются на английском.' },
+  { code: 'hi', name: 'Hindi',      prompt: 'C:\\DSTC>',  welcome: 'हिंदी प्रदर्शन इंटरफ़ेस — कमांड अंग्रेज़ी में ही रहेंगे।' },
+  { code: 'pt', name: 'Portuguese', prompt: 'C:\\DSTC>',  welcome: 'Interface de exibição em português — os comandos continuam em inglês.' }
+];
+let currentLangIndex = 0;
+
+function applyLanguage() {
+  const lang = languages[currentLangIndex];
+  const promptLabel = document.getElementById('dosPromptLabel');
+  if (promptLabel) promptLabel.textContent = lang.prompt + ' ';
+
+  const nameEl = document.getElementById('langCurrentName');
+  const idxEl = document.getElementById('langIndex');
+  if (nameEl) nameEl.textContent = lang.name;
+  if (idxEl) idxEl.textContent = (currentLangIndex + 1) + ' / ' + languages.length;
+}
+
+function cycleLanguage(direction) {
+  currentLangIndex = (currentLangIndex + direction + languages.length) % languages.length;
+  applyLanguage();
+  const lang = languages[currentLangIndex];
+  printLine('', null);
+  printLine('[Display language set to: ' + lang.name + ']', 'hint');
+  printLine(lang.welcome, 'hint');
+}
+
+/* ---------- بدء التشغيل ---------- */
+startBoot();
+</script>
+
+</body>
+</html>
