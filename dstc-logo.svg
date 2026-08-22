@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="dstcSwirl" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#d70a53"/>
+      <stop offset="100%" stop-color="#a80030"/>
+    </linearGradient>
+  </defs>
+  <path d="M50 8 C72 8 88 26 88 48 C88 66 74 80 58 82 C68 74 74 62 74 50 C74 32 60 20 44 20 C28 20 16 32 16 48 C16 62 26 74 40 78 C22 76 8 60 8 42 C8 23 27 8 50 8 Z" fill="url(#dstcSwirl)"/>
+  <circle cx="50" cy="48" r="15" fill="#fff"/>
+  <text x="50" y="48" font-family="Courier New, monospace" font-size="7.5" font-weight="bold" fill="#a80030" text-anchor="middle" dominant-baseline="central">DSTC</text>
+</svg>
